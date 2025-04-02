@@ -29,53 +29,74 @@ HardwareSerial rfd900x(PA_3, PA_2);
 LIDARLite lidar;
 SFE_UBLOX_GNSS gps;
 
+// Variables
+
+float prevSpeed = 0.0;  
+unsigned long prevTime = 0;
 uint16_t spec[SPEC_CHANNELS];
 
 // Data
 
 struct Data
 {
-    uint16_t avg_spec[16];
+    uint16_t counter;
+    uint32_t timeStamp;
     float gps_lat;
     float gps_lon;
     float gps_alt;
     float d_lidar;
-    float Voltage;
+    float velocity;
+    float acceleration;
+    float voltage;
     bool water_detect;
+    uint16_t avgSpec[16];
 };
 
 Data data;
 
-void readSpectrometer();
+extern void readSpectrometer();
 
-void printData();
+extern void printData();
 
 bool detectWater();
 
-void taskReadGps(void *)
+void taskReadGpsLidar(void *)
 {
     for (;;)
     {
+        //gps
         data.gps_lat = static_cast<double>(gps.getLatitude(UBLOX_CUSTOM_MAX_WAIT)) * 1.e-7;
         data.gps_lon = static_cast<double>(gps.getLongitude(UBLOX_CUSTOM_MAX_WAIT)) * 1.e-7;
         data.gps_alt = static_cast<double>(gps.getAltitude(UBLOX_CUSTOM_MAX_WAIT)) * 1.e-3f; // Ellipsoid
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-}
+        data.timeStamp = gps.getUnixEpoch(UBLOX_CUSTOM_MAX_WAIT);
+        data.velocity = gps.getGroundSpeed(UBLOX_CUSTOM_MAX_WAIT) / 1000.0;
+        
+        //Acceleration Calculation
+        unsigned long currentTime = millis();  // Get current timestamp in ms
 
-void taskReadLidar(void *)
-{
-    for (;;)
-    {
+        if (prevTime != 0)  
+        {
+          float deltaTime = (currentTime - prevTime) / 1000.0; // Convert ms to seconds
+    
+          if (deltaTime > 0)
+          {
+            data.acceleration = (data.velocity - prevSpeed) / deltaTime;
+          }
+        }
+        prevSpeed = data.velocity;
+        prevTime = currentTime;
+        
+        //lidar
         float total = 0;
         for (size_t i = 0; i < AVERAGE_SAMPLES; i++)
         {
-            float distance = static_cast<float>(lidar.distance()); // Get distance in cm
+            float distance = static_cast<float>(lidar.distance()); 
             total += distance;
             vTaskDelay(pdMS_TO_TICKS(10));
         }
         data.d_lidar = total / static_cast<float>(AVERAGE_SAMPLES);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
 
@@ -85,11 +106,11 @@ void taskReadSpec(void *)
     {
         readSpectrometer();
         if (detectWater()) {
-            data.water_detect = "Water Detected";
+            data.water_detect = true;
         } else {
-            data.water_detect = "No Water Detected";
+            data.water_detect = false;
         }
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
 
@@ -97,8 +118,8 @@ void checkVoltage(void * )
 {
     for(;;)
     {
-        data.Voltage = analogRead(SPEC_VIDEO) * (5.0 / 1023.0); // คำนวณแรงดัน
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        data.voltage = analogRead(SPEC_VIDEO) * (5.0 / 1023.0); // คำนวณแรงดัน
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
 
@@ -106,7 +127,7 @@ void taskPrint(void *)
 {
     for (;;)
     {
-        printData(); //water channels
+        printData(); 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
@@ -115,7 +136,36 @@ void taskSend(void *)
 {
     for (;;)
     {
-        rfd900x.write(reinterpret_cast<uint8_t *>(&data), sizeof(Data));
+        //rfd900x.write(reinterpret_cast<uint8_t *>(&data), sizeof(Data));
+        rfd900x.print(data.counter);
+        rfd900x.print(", ");
+        rfd900x.print(data.timeStamp);
+        rfd900x.print(", ");
+        rfd900x.print(data.gps_lat);
+        rfd900x.print(", ");
+        rfd900x.print(data.gps_lon);
+        rfd900x.print(", ");
+        rfd900x.print(data.gps_alt);
+        rfd900x.print(", ");
+        rfd900x.print(data.d_lidar);
+        rfd900x.print(", ");
+        rfd900x.print(data.velocity);
+        rfd900x.print(", ");
+        rfd900x.print(data.acceleration);
+        rfd900x.print(", ");
+        rfd900x.print(data.water_detect);
+        rfd900x.print(", ");
+        rfd900x.print(data.voltage);
+        rfd900x.print(", ");
+
+        for (int i = 0; i < 16; i++)
+        {
+            rfd900x.print(data.avgSpec[i]);
+            if (i<15) {
+                rfd900x.print(", ");
+            }
+        }
+        data.counter++;
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
@@ -147,13 +197,11 @@ void setup()
         gps.setDynamicModel(DYN_MODEL_AUTOMOTIVE, VAL_LAYER_RAM_BBR, UBLOX_CUSTOM_MAX_WAIT);
     }
 
-    xTaskCreate(taskReadGps, "", 1024, nullptr, 2, nullptr);
-    xTaskCreate(taskReadLidar, "", 1024, nullptr, 2, nullptr);
-    xTaskCreate(taskReadSpec, "", 1024, nullptr, 2, nullptr);
+    xTaskCreate(taskReadGpsLidar, "", 2048, nullptr, 2, nullptr);
+    xTaskCreate(taskReadSpec, "", 2048, nullptr, 2, nullptr);
+    xTaskCreate(checkVoltage, "", 1024, nullptr, 2, nullptr);
     xTaskCreate(taskPrint, "", 1024, nullptr, 2, nullptr);
     xTaskCreate(taskSend, "", 1024, nullptr, 2, nullptr);
-    xTaskCreate(checkVoltage, "", 1024, nullptr, 2, nullptr);
-
     vTaskStartScheduler();
 }
 
@@ -243,24 +291,29 @@ bool detectWater()
 
 void printData()
 {
-    Serial.print("LiDAR: ");
-    Serial.println(data.d_lidar);
-    Serial.print("Lat: ");
-    Serial.println(data.gps_lat);
-    Serial.print("Long: ");
-    Serial.println(data.gps_lon);
-    Serial.print("Voltage at SPEC_VIDEO: ");
-    Serial.print(data.Voltage);
-    Serial.println(" V");
-
-    for (int i = 0; i < SPEC_CHANNELS; i++)
+    Serial.println("Sensor Data:");
+    Serial.print("Counter: "); Serial.println(data.counter);
+    Serial.print("Timestamp: "); Serial.println(data.timeStamp);
+    Serial.print("GPS Latitude: "); Serial.println(data.gps_lat, 6);
+    Serial.print("GPS Longitude: "); Serial.println(data.gps_lon, 6);
+    Serial.print("GPS Altitude: "); Serial.println(data.gps_alt);
+    Serial.print("LIDAR Distance: "); Serial.println(data.d_lidar);
+    Serial.print("Velocity: "); Serial.println(data.velocity);
+    Serial.print("Acceleration: "); Serial.println(data.acceleration);
+    Serial.print("Voltage: "); Serial.println(data.voltage);
+    Serial.print("Water Detected: "); Serial.println(data.water_detect ? "Yes" : "No");
+    
+    Serial.print("Spectral Averages: ");
+    for (int i = 0; i < 16; i++)
     {
-        Serial.print(spec[i]);
-        Serial.print(',');
+        Serial.print(data.avgSpec[i]);
+        if (i<15) {
+            Serial.print(", ");
+        }
     }
     Serial.println();
-
-    // Serial.write(reinterpret_cast<uint8_t *>(&data), sizeof(Data));
+    
+    Serial.println("----------------------");
 }
 
 void loop()
