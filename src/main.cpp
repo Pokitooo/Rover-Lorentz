@@ -19,7 +19,7 @@
 #define SPEC_CHANNELS 288      // จำนวนช่องข้อมูลจากเซ็นเซอร์
 #define WATER_THRESHOLD 250    // ระดับ threshold สำหรับการตรวจจับน้ำ
 #define WATER_CHANNEL_START 50 // ช่วง channel ที่เกี่ยวข้องกับน้ำ
-#define WATER_CHANNEL_END 100
+#define WATER_CHANNEL_END 200
 
 constexpr int AVERAGE_SAMPLES = 10;
 
@@ -33,13 +33,14 @@ SFE_UBLOX_GNSS gps;
 
 float prevSpeed = 0.0;  
 unsigned long prevTime = 0;
+uint8_t sat = 0;
 uint16_t spec[SPEC_CHANNELS];
 
 // Data
 
 struct Data
 {
-    uint16_t counter;
+    uint8_t counter;
     uint32_t timeStamp;
     float gps_lat;
     float gps_lon;
@@ -67,9 +68,10 @@ void taskReadGpsLidar(void *)
         //gps
         data.gps_lat = static_cast<double>(gps.getLatitude(UBLOX_CUSTOM_MAX_WAIT)) * 1.e-7;
         data.gps_lon = static_cast<double>(gps.getLongitude(UBLOX_CUSTOM_MAX_WAIT)) * 1.e-7;
-        data.gps_alt = static_cast<double>(gps.getAltitude(UBLOX_CUSTOM_MAX_WAIT)) * 1.e-3f; // Ellipsoid
+        data.gps_alt = static_cast<float>(gps.getAltitude(UBLOX_CUSTOM_MAX_WAIT)) * 1.e-3f; // Ellipsoid
         data.timeStamp = gps.getUnixEpoch(UBLOX_CUSTOM_MAX_WAIT);
         data.velocity = gps.getGroundSpeed(UBLOX_CUSTOM_MAX_WAIT) / 1000.0;
+        sat = gps.getSIV(UBLOX_CUSTOM_MAX_WAIT);
         
         //Acceleration Calculation
         unsigned long currentTime = millis();  // Get current timestamp in ms
@@ -90,7 +92,7 @@ void taskReadGpsLidar(void *)
         float total = 0;
         for (size_t i = 0; i < AVERAGE_SAMPLES; i++)
         {
-            float distance = static_cast<float>(lidar.distance()); 
+            float distance = static_cast<float>(lidar.distance());  //cm
             total += distance;
             vTaskDelay(pdMS_TO_TICKS(10));
         }
@@ -137,13 +139,14 @@ void taskSend(void *)
     for (;;)
     {
         //rfd900x.write(reinterpret_cast<uint8_t *>(&data), sizeof(Data));
+        rfd900x.print("H");
         rfd900x.print(data.counter);
         rfd900x.print(", ");
         rfd900x.print(data.timeStamp);
         rfd900x.print(", ");
-        rfd900x.print(data.gps_lat);
+        rfd900x.print(data.gps_lat, 6);
         rfd900x.print(", ");
-        rfd900x.print(data.gps_lon);
+        rfd900x.print(data.gps_lon, 6);
         rfd900x.print(", ");
         rfd900x.print(data.gps_alt);
         rfd900x.print(", ");
@@ -157,6 +160,7 @@ void taskSend(void *)
         rfd900x.print(", ");
         rfd900x.print(data.voltage);
         rfd900x.print(", ");
+        
 
         for (int i = 0; i < 16; i++)
         {
@@ -165,6 +169,8 @@ void taskSend(void *)
                 rfd900x.print(", ");
             }
         }
+        rfd900x.println("A");
+
         data.counter++;
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
@@ -186,8 +192,8 @@ void setup()
     digitalWrite(SPEC_CLK, HIGH); // ตั้งค่าเริ่มต้นให้ SPEC_CLK สูง
     digitalWrite(SPEC_ST, LOW);   // ตั้งค่าเริ่มต้นให้ SPEC_ST ต่ำ
 
-    lidar.begin(0, true); // Initialize LIDAR with I2C
-    lidar.configure(0);   // Use default configuration
+    lidar.begin(0, true); 
+    lidar.configure(0);  
 
     if (gps.begin(0x42, UBLOX_CUSTOM_MAX_WAIT))
     {
@@ -294,6 +300,7 @@ void printData()
     Serial.println("Sensor Data:");
     Serial.print("Counter: "); Serial.println(data.counter);
     Serial.print("Timestamp: "); Serial.println(data.timeStamp);
+    Serial.print("Sat: "); Serial.println(sat);
     Serial.print("GPS Latitude: "); Serial.println(data.gps_lat, 6);
     Serial.print("GPS Longitude: "); Serial.println(data.gps_lon, 6);
     Serial.print("GPS Altitude: "); Serial.println(data.gps_alt);
