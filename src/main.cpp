@@ -1,9 +1,9 @@
 #include <Arduino.h>
 #include <lib_xcore>
-#include <LIDARLite.h>
-#include <Wire.h>
-#include <SparkFun_u-blox_GNSS_v3.h>
 #include <STM32FreeRTOS.h>
+#include <Wire.h>
+#include <LIDARLite.h>
+#include <SparkFun_u-blox_GNSS_v3.h>
 
 // hamamatsu Definitions
 
@@ -32,7 +32,7 @@ SFE_UBLOX_GNSS gps;
 // Variables
 
 float prevSpeed = 0.0;  
-unsigned long prevTime = 0;
+unsigned int prevTime = 0;
 uint8_t sat = 0;
 uint16_t spec[SPEC_CHANNELS];
 
@@ -74,7 +74,7 @@ void taskReadGpsLidar(void *)
         sat = gps.getSIV(UBLOX_CUSTOM_MAX_WAIT);
         
         //Acceleration Calculation
-        unsigned long currentTime = millis();  // Get current timestamp in ms
+        unsigned long currentTime = millis();  
 
         if (prevTime != 0)  
         {
@@ -160,7 +160,6 @@ void taskSend(void *)
         rfd900x.print(", ");
         rfd900x.print(data.voltage);
         rfd900x.print(", ");
-        
 
         for (int i = 0; i < 16; i++)
         {
@@ -300,11 +299,11 @@ void printData()
     Serial.println("Sensor Data:");
     Serial.print("Counter: "); Serial.println(data.counter);
     Serial.print("Timestamp: "); Serial.println(data.timeStamp);
-    Serial.print("Sat: "); Serial.println(sat);
+    Serial.print("Satellite Available: "); Serial.println(sat);
     Serial.print("GPS Latitude: "); Serial.println(data.gps_lat, 6);
     Serial.print("GPS Longitude: "); Serial.println(data.gps_lon, 6);
     Serial.print("GPS Altitude: "); Serial.println(data.gps_alt);
-    Serial.print("LIDAR Distance: "); Serial.println(data.d_lidar);
+    Serial.print("LIDAR Distance: "); Serial.print(data.d_lidar); Serial.println(" cm");
     Serial.print("Velocity: "); Serial.println(data.velocity);
     Serial.print("Acceleration: "); Serial.println(data.acceleration);
     Serial.print("Voltage: "); Serial.println(data.voltage);
