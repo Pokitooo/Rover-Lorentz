@@ -20,9 +20,9 @@
 #define LASER_404 PA_6
 
 #define SPEC_CHANNELS 288      // จำนวนช่องข้อมูลจากเซ็นเซอร์
-#define WATER_THRESHOLD 0.24f    // ระดับ threshold สำหรับการตรวจจับน้ำ
-#define WATER_CHANNEL_START 50 // ช่วง channel ที่เกี่ยวข้องกับน้ำ
-#define WATER_CHANNEL_END 200
+#define WATER_THRESHOLD 0.20f    // ระดับ threshold สำหรับการตรวจจับน้ำ
+#define WATER_CHANNEL_START 0 // ช่วง channel ที่เกี่ยวข้องกับน้ำ
+#define WATER_CHANNEL_END 150
 
 #define DELAY(MS) vTaskDelay(pdMS_TO_TICKS(MS))
 
@@ -135,7 +135,7 @@ void averageData(void *)
                 sum += spec[i * groupSize + j];
             }
 
-            data.avgSpec[i] = (sum / groupSize) * 255;
+            data.avgSpec[i] = (sum / groupSize) * ADC_DIVIDER;
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
@@ -218,6 +218,7 @@ void setup()
 
     digitalWriteFast(SPEC_CLK, HIGH); // ตั้งค่าเริ่มต้นให้ SPEC_CLK สูง
     digitalWriteFast(SPEC_ST, LOW);   // ตั้งค่าเริ่มต้นให้ SPEC_ST ต่ำ
+    digitalWriteFast(WHITE_LED, LOW);
 
     lidar.begin(0, true);
     lidar.configure(0);
@@ -230,7 +231,7 @@ void setup()
         gps.setDynamicModel(DYN_MODEL_AUTOMOTIVE, VAL_LAYER_RAM_BBR, UBLOX_CUSTOM_MAX_WAIT);
     }
 
-    //xTaskCreate(taskReadGpsLidar, "", 2048, nullptr, 2, nullptr);
+    xTaskCreate(taskReadGpsLidar, "", 2048, nullptr, 2, nullptr);
     xTaskCreate(taskReadSpec, "", 4096, nullptr, 2, nullptr);
     xTaskCreate(averageData, "", 1024, nullptr, 2, nullptr);
     xTaskCreate(checkVoltage, "", 1024, nullptr, 2, nullptr);
@@ -243,7 +244,7 @@ void readSpectrometer()
 {
     static constexpr int delayTime = 1; // หน่วงเวลาระหว่างการอ่าน
 
-    digitalWriteFast(WHITE_LED, HIGH);
+    //digitalWriteFast(WHITE_LED, HIGH);
     digitalWriteFast(SPEC_CLK, LOW);
     delayMicroseconds(delayTime);
     digitalWriteFast(SPEC_CLK, HIGH);
@@ -280,11 +281,9 @@ void readSpectrometer()
     // อ่านค่าจาก SPEC_VIDEO
     for (int i = 0; i < SPEC_CHANNELS; i++)
     {
-        float sum = 0; // สำหรับค่าเฉลี่ย
-        for (int j = 0; j < AVERAGE_SAMPLES; j++)
-            delayMicroseconds(delayTime);
-            sum += analogRead(digitalPinToAnalogInput(pinNametoDigitalPin(SPEC_VIDEO))); // อ่านค่า ADC หลายครั้ง
-        spec[i] = sum / static_cast<float>(AVERAGE_SAMPLES) / ADC_DIVIDER; // คำนวณค่าเฉลี่ย
+
+        delayMicroseconds(delayTime);
+        spec[i] = analogRead(digitalPinToAnalogInput(pinNametoDigitalPin(SPEC_VIDEO))) / ADC_DIVIDER; // อ่านค่า ADC หลายครั้ง
         digitalWriteFast(SPEC_CLK, HIGH);
         delayMicroseconds(delayTime);
         digitalWriteFast(SPEC_CLK, LOW);
