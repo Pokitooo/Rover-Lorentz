@@ -2,29 +2,33 @@
 #include <lib_xcore>
 #include <STM32FreeRTOS.h>
 #include <Wire.h>
+#include <EEPROM.h>
 #include <LIDARLite.h>
 #include <SparkFun_u-blox_GNSS_v3.h>
 
-// hamamatsu Definitions
-
 #define UBLOX_CUSTOM_MAX_WAIT (250u)
 
-#define ADC_BITS (8)
-#define ADC_DIVIDER static_cast<float>((1 << ADC_BITS) - 1)
+// ADC
 
-#define SPEC_TRG PA_0
-#define SPEC_ST PA_1
-#define SPEC_CLK PB_12
-#define SPEC_VIDEO PA_4
-#define WHITE_LED PA_5
-#define LASER_404 PA_6
+constexpr size_t ADC_BITS (8);
+constexpr float ADC_DIVIDER = ((1 << ADC_BITS) - 1);
 
-#define SPEC_CHANNELS 288      // จำนวนช่องข้อมูลจากเซ็นเซอร์
-#define WATER_THRESHOLD 0.20f    // ระดับ threshold สำหรับการตรวจจับน้ำ
+// hamamatsu Definitions
+
+constexpr PinName SPEC_ST = PinName::PA_1;
+constexpr PinName SPEC_CLK = PinName::PB_12;
+constexpr PinName SPEC_VIDEO = PinName::PA_4;
+constexpr PinName WHITE_LED = PinName::PA_5;
+
+constexpr size_t SPEC_CHANNELS = 288;    // จำนวนช่องข้อมูลจากเซ็นเซอร์
+
+#define WATER_THRESHOLD 0.20 // ระดับ threshold สำหรับการตรวจจับน้ำ
 #define WATER_CHANNEL_START 0 // ช่วง channel ที่เกี่ยวข้องกับน้ำ
 #define WATER_CHANNEL_END 150
 
 #define DELAY(MS) vTaskDelay(pdMS_TO_TICKS(MS))
+
+// Average
 
 const int groupSize = 18;
 const int numGroups = SPEC_CHANNELS / groupSize; // =16
@@ -41,7 +45,7 @@ SFE_UBLOX_GNSS gps;
 float prevSpeed = 0.0;
 unsigned int prevTime = 0;
 uint8_t sat = 0;
-float spec[SPEC_CHANNELS];
+float avgSpec[numGroups];
 
 // Data
 
@@ -57,16 +61,22 @@ struct Data
     float acceleration;
     float voltage;
     bool water_detect;
-    uint16_t avgSpec[16];
+    float spec[SPEC_CHANNELS];
 };
 
 Data data;
+
+// Functions
 
 extern void readSpectrometer();
 
 extern void printData();
 
+extern void sendData();
+
 bool detectWater();
+
+// RTOS
 
 void taskReadGpsLidar(void *)
 {
@@ -97,7 +107,7 @@ void taskReadGpsLidar(void *)
 
         // lidar
         float total = 0;
-        for (size_t i = 0; i < AVERAGE_SAMPLES; i++)
+        for (size_t i = 0; i < AVERAGE_SAMPLES; ++i)
         {
             float distance = static_cast<float>(lidar.distance()); // cm
             total += distance;
@@ -105,7 +115,7 @@ void taskReadGpsLidar(void *)
         }
         data.d_lidar = total / static_cast<float>(AVERAGE_SAMPLES);
 
-        vTaskDelay(pdMS_TO_TICKS(500));
+        DELAY(500);
     }
 }
 
@@ -116,9 +126,9 @@ void taskReadSpec(void *)
         taskENTER_CRITICAL();
         readSpectrometer();
         data.water_detect = detectWater();
+        data.voltage = analogRead(digitalPinToAnalogInput(pinNametoDigitalPin(SPEC_VIDEO))) * (5.0 / 1023.0); // คำนวณแรงดัน
         taskEXIT_CRITICAL();
-
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        DELAY(1000);
     }
 }
 
@@ -126,27 +136,18 @@ void averageData(void *)
 {
     for (;;)
     {
-        for (int i = 0; i < numGroups; i++)
+        for (int i = 0; i < numGroups; ++i)
         {
             float sum = 0;
 
-            for (int j = 0; j < groupSize; j++)
+            for (int j = 0; j < groupSize; ++j)
             {
-                sum += spec[i * groupSize + j];
+                sum += data.spec[i * groupSize + j];
             }
 
-            data.avgSpec[i] = (sum / groupSize) * ADC_DIVIDER;
+            avgSpec[i] = (sum / groupSize) * ADC_DIVIDER;
         }
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-}
-
-void checkVoltage(void *)
-{
-    for (;;)
-    {
-        data.voltage = analogRead(digitalPinToAnalogInput(pinNametoDigitalPin(SPEC_VIDEO))) * (5.0 / 1023.0); // คำนวณแรงดัน
-        vTaskDelay(pdMS_TO_TICKS(500));
+        DELAY(1000);
     }
 }
 
@@ -155,7 +156,7 @@ void taskPrint(void *)
     for (;;)
     {
         printData();
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        DELAY(1000);
     }
 }
 
@@ -163,41 +164,9 @@ void taskSend(void *)
 {
     for (;;)
     {
-        // rfd900x.write(reinterpret_cast<uint8_t *>(&data), sizeof(Data));
-        rfd900x.print("H");
-        rfd900x.print(data.counter);
-        rfd900x.print(", ");
-        rfd900x.print(data.timeStamp);
-        rfd900x.print(", ");
-        rfd900x.print(data.gps_lat, 6);
-        rfd900x.print(", ");
-        rfd900x.print(data.gps_lon, 6);
-        rfd900x.print(", ");
-        rfd900x.print(data.gps_alt);
-        rfd900x.print(", ");
-        rfd900x.print(data.d_lidar);
-        rfd900x.print(", ");
-        rfd900x.print(data.velocity);
-        rfd900x.print(", ");
-        rfd900x.print(data.acceleration);
-        rfd900x.print(", ");
-        rfd900x.print(data.water_detect);
-        rfd900x.print(", ");
-        rfd900x.print(data.voltage);
-        rfd900x.print(", ");
-
-        for (int i = 0; i < 16; i++)
-        {
-            rfd900x.print(data.avgSpec[i]);
-            if (i < 15)
-            {
-                rfd900x.print(", ");
-            }
-        }
-        rfd900x.println("A");
-
+        sendData();
         data.counter++;
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        DELAY(1000);
     }
 }
 
@@ -211,7 +180,6 @@ void setup()
 
     pinMode(pinNametoDigitalPin(SPEC_CLK), OUTPUT);
     pinMode(pinNametoDigitalPin(SPEC_ST), OUTPUT);
-    pinMode(pinNametoDigitalPin(LASER_404), OUTPUT);
     pinMode(pinNametoDigitalPin(WHITE_LED), OUTPUT);
     pinMode(pinNametoDigitalPin(SPEC_VIDEO), INPUT_ANALOG);
     analogReadResolution(ADC_BITS);
@@ -221,7 +189,7 @@ void setup()
     digitalWriteFast(WHITE_LED, LOW);
 
     lidar.begin(0, true);
-    lidar.configure(0);
+    lidar.configure(3);
 
     if (gps.begin(0x42, UBLOX_CUSTOM_MAX_WAIT))
     {
@@ -233,8 +201,7 @@ void setup()
 
     xTaskCreate(taskReadGpsLidar, "", 2048, nullptr, 2, nullptr);
     xTaskCreate(taskReadSpec, "", 4096, nullptr, 2, nullptr);
-    xTaskCreate(averageData, "", 1024, nullptr, 2, nullptr);
-    xTaskCreate(checkVoltage, "", 1024, nullptr, 2, nullptr);
+    //xTaskCreate(averageData, "", 1024, nullptr, 2, nullptr);
     xTaskCreate(taskPrint, "", 1024, nullptr, 2, nullptr);
     xTaskCreate(taskSend, "", 1024, nullptr, 2, nullptr);
     vTaskStartScheduler();
@@ -244,7 +211,7 @@ void readSpectrometer()
 {
     static constexpr int delayTime = 1; // หน่วงเวลาระหว่างการอ่าน
 
-    //digitalWriteFast(WHITE_LED, HIGH);
+    // digitalWriteFast(WHITE_LED, HIGH);
     digitalWriteFast(SPEC_CLK, LOW);
     delayMicroseconds(delayTime);
     digitalWriteFast(SPEC_CLK, HIGH);
@@ -254,7 +221,7 @@ void readSpectrometer()
     delayMicroseconds(delayTime);
 
     // ทำ clock cycle 15 ครั้ง
-    for (int i = 0; i < 15; i++)
+    for (int i = 0; i < 15; ++i)
     {
         digitalWriteFast(SPEC_CLK, HIGH);
         delayMicroseconds(delayTime);
@@ -265,7 +232,7 @@ void readSpectrometer()
     digitalWriteFast(SPEC_ST, LOW); // ปิด Start pulse
 
     // ทำ clock cycle 85 ครั้ง
-    for (int i = 0; i < 85; i++)
+    for (int i = 0; i < 85; ++i)
     {
         digitalWriteFast(SPEC_CLK, HIGH);
         delayMicroseconds(delayTime);
@@ -279,11 +246,11 @@ void readSpectrometer()
     delayMicroseconds(delayTime);
 
     // อ่านค่าจาก SPEC_VIDEO
-    for (int i = 0; i < SPEC_CHANNELS; i++)
+    for (int i = 0; i < SPEC_CHANNELS; ++i)
     {
 
         delayMicroseconds(delayTime);
-        spec[i] = analogRead(digitalPinToAnalogInput(pinNametoDigitalPin(SPEC_VIDEO))) / ADC_DIVIDER; // อ่านค่า ADC หลายครั้ง
+        data.spec[i] = analogRead(digitalPinToAnalogInput(pinNametoDigitalPin(SPEC_VIDEO))); // อ่านค่า ADC หลายครั้ง
         digitalWriteFast(SPEC_CLK, HIGH);
         delayMicroseconds(delayTime);
         digitalWriteFast(SPEC_CLK, LOW);
@@ -293,7 +260,7 @@ void readSpectrometer()
     digitalWriteFast(SPEC_ST, HIGH);
 
     // Clock cycle อีก 7 ครั้ง
-    for (int i = 0; i < 7; i++)
+    for (int i = 0; i < 7; ++i)
     {
         digitalWriteFast(SPEC_CLK, HIGH);
         delayMicroseconds(delayTime);
@@ -311,10 +278,10 @@ bool detectWater()
     float avg = 0.f;
 
     // ตรวจสอบค่าช่องข้อมูลที่เกี่ยวข้อง
-    for (int i = WATER_CHANNEL_START; i < WATER_CHANNEL_END; i++)
+    for (int i = WATER_CHANNEL_START; i < WATER_CHANNEL_END; ++i)
     {
-        waterSignal += spec[i] > WATER_THRESHOLD;
-        avg += spec[i];
+        waterSignal += data.spec[i] > WATER_THRESHOLD;
+        avg += data.spec[i];
     }
 
     Serial.print("WATER AVG = ");
@@ -322,6 +289,42 @@ bool detectWater()
 
     // หากค่าช่องที่เกิน Threshold มากกว่าครึ่งของช่วง ให้ถือว่าตรวจจับน้ำได้
     return waterSignal > (WATER_CHANNEL_END - WATER_CHANNEL_START) / 2;
+}
+
+void sendData()
+{
+    // rfd900x.write(reinterpret_cast<uint8_t *>(&data), sizeof(Data));
+    rfd900x.print("H");
+    rfd900x.print(data.counter);
+    rfd900x.print(", ");
+    rfd900x.print(data.timeStamp);
+    rfd900x.print(", ");
+    rfd900x.print(data.gps_lat, 6);
+    rfd900x.print(", ");
+    rfd900x.print(data.gps_lon, 6);
+    rfd900x.print(", ");
+    rfd900x.print(data.gps_alt);
+    rfd900x.print(", ");
+    rfd900x.print(data.d_lidar);
+    rfd900x.print(", ");
+    rfd900x.print(data.velocity);
+    rfd900x.print(", ");
+    rfd900x.print(data.acceleration);
+    rfd900x.print(", ");
+    rfd900x.print(data.water_detect);
+    rfd900x.print(", ");
+    rfd900x.print(data.voltage);
+    rfd900x.print(", ");
+
+    for (int i = 0; i < SPEC_CHANNELS; ++i)
+    {
+        rfd900x.print(data.spec[i]);
+        if (i < SPEC_CHANNELS - 1)
+        {
+            rfd900x.print(", ");
+        }
+    }
+    rfd900x.println("A");
 }
 
 void printData()
@@ -352,9 +355,9 @@ void printData()
     Serial.println(data.water_detect ? "Yes" : "No");
 
     Serial.print("Full Spectral: ");
-    for (int i = 0; i < SPEC_CHANNELS; i++)
+    for (int i = 0; i < SPEC_CHANNELS; ++i)
     {
-        Serial.print(spec[i]);
+        Serial.print(data.spec[i]);
         if (i < SPEC_CHANNELS - 1)
         {
             Serial.print(',');
@@ -363,9 +366,9 @@ void printData()
     Serial.println();
 
     Serial.print("Spectral Averages: ");
-    for (int i = 0; i < numGroups; i++)
+    for (int i = 0; i < numGroups; ++i)
     {
-        Serial.print(data.avgSpec[i]);
+        Serial.print(avgSpec[i]);
         if (i < numGroups - 1)
         {
             Serial.print(", ");
