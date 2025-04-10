@@ -367,7 +367,7 @@ void printData()
     }
     Serial.println();
 
-    Serial.print("Spectral Averages: ");
+    /*Serial.print("Spectral Averages: ");
     for (int i = 0; i < numGroups; ++i)
     {
         Serial.print(avgSpec[i]);
@@ -376,7 +376,7 @@ void printData()
             Serial.print(", ");
         }
     }
-    Serial.println();
+    Serial.println();*/
 
     Serial.println("----------------------");
 }
