@@ -74,6 +74,10 @@ extern void printData();
 
 extern void sendData();
 
+extern void receiveCommand();
+
+extern void accelCalculation();
+
 bool detectWater();
 
 // RTOS
@@ -91,19 +95,7 @@ void taskReadGpsLidar(void *)
         sat = gps.getSIV(UBLOX_CUSTOM_MAX_WAIT);
 
         // Acceleration Calculation
-        unsigned long currentTime = millis();
-
-        if (prevTime != 0)
-        {
-            float deltaTime = (currentTime - prevTime) / 1000.0; // Convert ms to seconds
-
-            if (deltaTime > 0)
-            {
-                data.acceleration = (data.velocity - prevSpeed) / deltaTime;
-            }
-        }
-        prevSpeed = data.velocity;
-        prevTime = currentTime;
+        accelCalculation();
 
         // lidar
         float total = 0;
@@ -170,6 +162,15 @@ void taskSend(void *)
     }
 }
 
+void receiveConfig(void *)
+{
+    for(;;)
+    {
+        receiveCommand();
+        DELAY(1010);
+    }
+}
+
 void setup()
 {
     Serial.begin(460800);
@@ -186,10 +187,10 @@ void setup()
 
     digitalWriteFast(SPEC_CLK, HIGH); // ตั้งค่าเริ่มต้นให้ SPEC_CLK สูง
     digitalWriteFast(SPEC_ST, LOW);   // ตั้งค่าเริ่มต้นให้ SPEC_ST ต่ำ
-    digitalWriteFast(WHITE_LED, LOW);
+    digitalWriteFast(WHITE_LED, HIGH);
 
     lidar.begin(0, true);
-    lidar.configure(3);
+    lidar.configure(0);
 
     if (gps.begin(0x42, UBLOX_CUSTOM_MAX_WAIT))
     {
@@ -201,9 +202,10 @@ void setup()
 
     xTaskCreate(taskReadGpsLidar, "", 2048, nullptr, 2, nullptr);
     xTaskCreate(taskReadSpec, "", 4096, nullptr, 2, nullptr);
-    //xTaskCreate(averageData, "", 1024, nullptr, 2, nullptr);
     xTaskCreate(taskPrint, "", 1024, nullptr, 2, nullptr);
     xTaskCreate(taskSend, "", 1024, nullptr, 2, nullptr);
+    xTaskCreate(receiveConfig, "", 1024, nullptr, 2, nullptr);
+    //xTaskCreate(averageData, "", 1024, nullptr, 2, nullptr);
     vTaskStartScheduler();
 }
 
@@ -286,7 +288,7 @@ bool detectWater()
 
     Serial.print("WATER AVG = ");
     Serial.println(avg / (WATER_CHANNEL_END - WATER_CHANNEL_START));
-
+        
     // หากค่าช่องที่เกิน Threshold มากกว่าครึ่งของช่วง ให้ถือว่าตรวจจับน้ำได้
     return waterSignal > (WATER_CHANNEL_END - WATER_CHANNEL_START) / 2;
 }
@@ -377,6 +379,70 @@ void printData()
     Serial.println();
 
     Serial.println("----------------------");
+}
+
+void accelCalculation()
+{
+    unsigned long currentTime = millis();
+
+    if (prevTime != 0)
+    {
+        float deltaTime = (currentTime - prevTime) / 1000.0; // Convert ms to seconds
+
+        if (deltaTime > 0)
+        {
+            data.acceleration = (data.velocity - prevSpeed) / deltaTime;
+        }
+    }
+    prevSpeed = data.velocity;
+    prevTime = currentTime;
+}
+
+void receiveCommand()
+{
+    while (rfd900x.available() > 0) 
+    {
+        char receivedData = rfd900x.read();
+        Serial.println(receivedData);
+
+        switch (receivedData)
+        {
+        case '0':
+            lidar.configure(0);
+            break;
+
+        case '1':
+            lidar.configure(1);
+            break;
+
+        case '2':
+            lidar.configure(2);
+            break;
+
+        case '3':
+            lidar.configure(3);
+            break;
+
+        case '4':
+            lidar.configure(4);
+            break;
+
+        case '5':
+            lidar.configure(5);
+            break;
+
+        case '6':
+            digitalWriteFast(WHITE_LED, HIGH);
+            break;
+
+        case '7':
+            digitalWriteFast(WHITE_LED, LOW);
+            break;
+
+        default:
+            break;
+        }
+    }
 }
 
 void loop()
