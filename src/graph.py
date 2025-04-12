@@ -6,7 +6,7 @@ import serial.tools.list_ports
 import sys
 
 # === Config ===
-#SERIAL_PORT = 'COM9'  # Change to your port
+SERIAL_PORT = 'COM14'  # Change to your port
 BAUD_RATE = 115200
 CHANNELS = 288
 
@@ -31,31 +31,31 @@ plot.setYRange(0, 1.2)
 plot.setXRange(0, CHANNELS - 1)
 win.show()
 
-def find_serial_port():
-    # List all available serial ports
-    ports = list(serial.tools.list_ports.comports())
+# def find_serial_port():
+#     # List all available serial ports
+#     ports = list(serial.tools.list_ports.comports())
     
-    if not ports:
-        raise Exception("No serial ports found.")
+#     if not ports:
+#         raise Exception("No serial ports found.")
     
-    # Print available ports for debugging/informative purposes
-    for port in ports:
-        print(f"Found port: {port.device}")
+#     # Print available ports for debugging/informative purposes
+#     for port in ports:
+#         print(f"Found port: {port.device}")
 
-    # Strategy for auto-detection: simply return the first port found
-    # You might want to add logic to choose a specific port if multiple are available.
-    return ports[0].device
+#     # Strategy for auto-detection: simply return the first port found
+#     # You might want to add logic to choose a specific port if multiple are available.
+#     return ports[0].device
 
-# Get a port automatically
-SERIAL_PORT = find_serial_port()
-print(f"Using port: {SERIAL_PORT}")
+# # Get a port automatically
+# SERIAL_PORT = find_serial_port()
+# print(f"Using port: {SERIAL_PORT}")
 
-# Now, create your serial connection
-try:
-    ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-    # You can now interact with your device via 'ser'
-except serial.SerialException as e:
-    print(f"Error opening serial port {SERIAL_PORT}: {e}")
+# # Now, create your serial connection
+# try:
+#     ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+#     # You can now interact with your device via 'ser'
+# except serial.SerialException as e:
+#     print(f"Error opening serial port {SERIAL_PORT}: {e}")
 
 # === Serial Setup ===
 ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)

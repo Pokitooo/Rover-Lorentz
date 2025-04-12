@@ -10,7 +10,7 @@
 
 // ADC
 
-constexpr size_t ADC_BITS (8);
+constexpr size_t ADC_BITS (10);
 constexpr float ADC_DIVIDER = ((1 << ADC_BITS) - 1);
 
 // hamamatsu Definitions
@@ -78,7 +78,9 @@ extern void receiveCommand();
 
 extern void accelCalculation();
 
-bool detectWater();
+extern bool detectWater();
+
+extern void config_lidar();
 
 // RTOS
 
@@ -174,10 +176,7 @@ void receiveConfig(void *)
 void setup()
 {
     Serial.begin(460800);
-
     rfd900x.begin(57600);
-
-    Wire.begin();
 
     pinMode(pinNametoDigitalPin(SPEC_CLK), OUTPUT);
     pinMode(pinNametoDigitalPin(SPEC_ST), OUTPUT);
@@ -188,10 +187,7 @@ void setup()
     digitalWriteFast(SPEC_CLK, HIGH); // ตั้งค่าเริ่มต้นให้ SPEC_CLK สูง
     digitalWriteFast(SPEC_ST, LOW);   // ตั้งค่าเริ่มต้นให้ SPEC_ST ต่ำ
     digitalWriteFast(WHITE_LED, HIGH);
-
-    lidar.begin(0, true);
-    lidar.configure(0);
-
+    
     if (gps.begin(0x42, UBLOX_CUSTOM_MAX_WAIT))
     {
         gps.setI2COutput(COM_TYPE_UBX, VAL_LAYER_RAM_BBR, UBLOX_CUSTOM_MAX_WAIT);
@@ -199,14 +195,28 @@ void setup()
         gps.setAutoPVT(true, VAL_LAYER_RAM_BBR, UBLOX_CUSTOM_MAX_WAIT);
         gps.setDynamicModel(DYN_MODEL_AUTOMOTIVE, VAL_LAYER_RAM_BBR, UBLOX_CUSTOM_MAX_WAIT);
     }
+    
+    Wire.begin();
+    lidar.begin(0, true);
+    lidar.configure(0);
+
+    // Wire.begin();
+    // Wire.setClock(400'000ul);
+    // config_lidar();
 
     xTaskCreate(taskReadGpsLidar, "", 2048, nullptr, 2, nullptr);
     xTaskCreate(taskReadSpec, "", 4096, nullptr, 2, nullptr);
     xTaskCreate(taskPrint, "", 1024, nullptr, 2, nullptr);
     xTaskCreate(taskSend, "", 1024, nullptr, 2, nullptr);
     xTaskCreate(receiveConfig, "", 1024, nullptr, 2, nullptr);
-    //xTaskCreate(averageData, "", 1024, nullptr, 2, nullptr);
+    // xTaskCreate(averageData, "", 1024, nullptr, 2, nullptr);
     vTaskStartScheduler();
+}
+
+void config_lidar() {
+    lidar.write(0x02,0x80); // Max Acquisiton Count: 0x80
+    lidar.write(0x04,0x08); // Quick Termination Detection: 0x08
+    lidar.write(0x1c,0x00); // Sensitivty: 0x60 (low sensitivty)
 }
 
 void readSpectrometer()
