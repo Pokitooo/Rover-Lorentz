@@ -2,7 +2,6 @@
 #include <lib_xcore>
 #include <STM32FreeRTOS.h>
 #include <Wire.h>
-#include <EEPROM.h>
 #include <LIDARLite.h>
 #include <SparkFun_u-blox_GNSS_v3.h>
 
@@ -159,7 +158,7 @@ void taskSend(void *)
     for (;;)
     {
         sendData();
-        data.counter++;
+        ++data.counter;
         DELAY(1000);
     }
 }
@@ -169,7 +168,6 @@ void receiveConfig(void *)
     for(;;)
     {
         receiveCommand();
-        DELAY(1010);
     }
 }
 
@@ -199,10 +197,6 @@ void setup()
     Wire.begin();
     lidar.begin(0, true);
     lidar.configure(0);
-
-    // Wire.begin();
-    // Wire.setClock(400'000ul);
-    // config_lidar();
 
     xTaskCreate(taskReadGpsLidar, "", 2048, nullptr, 2, nullptr);
     xTaskCreate(taskReadSpec, "", 4096, nullptr, 2, nullptr);
